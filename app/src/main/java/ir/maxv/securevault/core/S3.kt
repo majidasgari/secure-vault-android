@@ -181,6 +181,11 @@ class S3Client(
     val config: S3Config,
     private val connectTimeoutMs: Int = 15_000,
     private val readTimeoutMs: Int = 60_000,
+    /**
+     * Where a failure gets reported (the Android layer wires this to logcat). Kept as a callback so
+     * this file stays free of Android imports and can run in a plain JVM test.
+     */
+    private val log: ((String) -> Unit)? = null,
 ) {
     private val region: String = config.region.trim().ifEmpty { "us-east-1" }
     private val scheme: String
@@ -256,15 +261,41 @@ class S3Client(
         return conn
     }
 
-    /** Return the object bytes, or `null` when the key does not exist. */
+    /**
+     * Turn a failed response into an exception that says *why*, using the provider's own error
+     * document (`<Code>`/`<Message>`). Without this a 403 only reads "HTTP 403", which hides the
+     * difference between a wrong key, a wrong region and a missing permission.
+     */
+    private fun failure(conn: HttpURLConnection, method: String, target: String, status: Int): S3Exception {
+        val body = try {
+            conn.errorStream?.use { it.readBytes() }
+        } catch (_: Exception) {
+            null
+        }
+        val text = body?.toString(Charsets.UTF_8)?.trim().orEmpty()
+        val code = Regex("<Code>([^<]+)</Code>").find(text)?.groupValues?.get(1)
+        val message = Regex("<Message>([^<]+)</Message>").find(text)?.groupValues?.get(1)
+        val detail = listOfNotNull(code, message).joinToString(" — ").ifBlank { text.take(200) }
+        val error = S3Exception(
+            code ?: "s3_http_$status",
+            "$method $target → HTTP $status" + if (detail.isBlank()) "" else " — $detail",
+            status,
+        )
+        log?.invoke("${error.code}: ${error.message}")
+        return error
+    }
+
+    /** Return the object bytes, or `null` when the key does not exist (404 — and nothing else). */
     fun get(key: String): ByteArray? {
         val conn = open("GET", key)
         return try {
             val status = conn.responseCode
             when {
                 status == 200 -> conn.inputStream.readBytes()
-                status == 403 || status == 404 -> null
-                else -> throw S3Exception("s3_get_failed", "GET $key → HTTP $status", status)
+                // A 403 is *not* "missing": it means the keys, the region or the bucket policy are
+                // wrong, and reporting it as an absent object would hide the real problem.
+                status == 404 -> null
+                else -> throw failure(conn, "GET", key, status)
             }
         } finally {
             conn.disconnect()
@@ -279,8 +310,8 @@ class S3Client(
         val conn = open("GET", key)
         try {
             val status = conn.responseCode
-            if (status == 403 || status == 404) return null
-            if (status != 200) throw S3Exception("s3_get_failed", "GET $key → HTTP $status", status)
+            if (status == 404) return null
+            if (status != 200) throw failure(conn, "GET", key, status)
             val total = conn.getHeaderField("Content-Length")?.toLongOrNull() ?: -1L
             target.parentFile?.mkdirs()
             val tmp = File(target.parentFile, target.name + ".part")
@@ -315,8 +346,8 @@ class S3Client(
         val conn = open("HEAD", key)
         return try {
             val status = conn.responseCode
-            if (status == 403 || status == 404) null
-            else if (status != 200) throw S3Exception("s3_head_failed", "HEAD $key → HTTP $status", status)
+            if (status == 404) null
+            else if (status != 200) throw failure(conn, "HEAD", key, status)
             else conn.getHeaderField("ETag")?.trim('"')
         } finally {
             conn.disconnect()
@@ -336,7 +367,7 @@ class S3Client(
             val body = try {
                 val status = conn.responseCode
                 if (status != 200) {
-                    throw S3Exception("s3_list_failed", "LIST $prefix → HTTP $status", status)
+                    throw failure(conn, "LIST", prefix, status)
                 }
                 conn.inputStream.readBytes()
             } finally {
@@ -359,7 +390,8 @@ class S3Client(
             val doc = try {
                 factory.newDocumentBuilder().parse(body.inputStream())
             } catch (e: Exception) {
-                throw S3Exception("s3_list_failed", "bad_xml: ${e.message}")
+                val head = body.toString(Charsets.UTF_8).trim().take(200)
+                throw S3Exception("s3_list_failed", "bad_xml: ${e.message} — body: $head")
             }
             val objects = ArrayList<S3Object>()
             val contents = doc.getElementsByTagName("Contents")

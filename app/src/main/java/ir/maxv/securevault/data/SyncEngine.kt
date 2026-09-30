@@ -39,9 +39,10 @@ class VaultNotInBucket(message: String) : Exception(message)
 class SyncEngine(
     private val mirror: LocalMirror,
     private var config: S3Config,
+    private val log: ((String) -> Unit)? = null,
 ) {
 
-    private fun client(): S3Client = S3Client(config)
+    private fun client(): S3Client = S3Client(config, log = log)
 
     val prefix: String get() = config.normalizedPrefix()
 

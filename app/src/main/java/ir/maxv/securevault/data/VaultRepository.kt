@@ -1,6 +1,7 @@
 package ir.maxv.securevault.data
 
 import android.content.Context
+import android.util.Log
 import ir.maxv.securevault.core.KdfUnavailable
 import ir.maxv.securevault.core.KeyDerivation
 import ir.maxv.securevault.core.S3Config
@@ -54,6 +55,15 @@ data class AppState(
  * Every call that touches the network, the KDF or the mirror, runs off the main thread.
  */
 class VaultRepository(private val context: Context) {
+
+    /**
+     * Deliberately sparse: one line per meaningful event (a failed request with the provider's own
+     * error code, a finished sync, a refused unlock). No per-file chatter — `adb logcat -s SecureVault`
+     * should stay readable.
+     */
+    private fun note(message: String) = Log.i(TAG, message)
+
+    private fun warn(message: String) = Log.w(TAG, message)
 
     private val mirror = LocalMirror(context)
     private val workDir = File(context.cacheDir, "work")
@@ -118,12 +128,18 @@ class VaultRepository(private val context: Context) {
 
     suspend fun testConnection(): String = withContext(Dispatchers.IO) {
         val config = config()
-            ?: return@withContext "اطلاعات اتصال کامل نیست یا کلیدها ذخیره نشده‌اند."
+            ?: return@withContext "اطلاعات اتصال کامل نیست یا کلیدها ذخیره نشده‌اند.".also { setError(it) }
         try {
-            val count = SyncEngine(mirror, config).testConnection()
-            "اتصال برقرار شد — $count شیء در مسیر مخزن."
+            val count = SyncEngine(mirror, config, log = ::warn).testConnection()
+            val message = "اتصال برقرار شد — $count شیء در مسیر مخزن."
+            note(message)
+            setError(null)
+            message
         } catch (e: Exception) {
-            "اتصال ناموفق: ${e.message ?: e.javaClass.simpleName}"
+            val message = "اتصال ناموفق: ${e.message ?: e.javaClass.simpleName}"
+            warn("testConnection: $message")
+            setError(message)
+            message
         }
     }
 
@@ -132,7 +148,7 @@ class VaultRepository(private val context: Context) {
         withContext(Dispatchers.IO) {
             val existingMeta = readLocalMeta()
             val config = config(existingMeta) ?: return@withContext "کلیدهای S3 ذخیره نشده است."
-            val engine = SyncEngine(mirror, config)
+            val engine = SyncEngine(mirror, config, log = ::warn)
             val state = mirror.loadState()
             setBusy("همگام‌سازی فهرست…")
             try {
@@ -169,10 +185,12 @@ class VaultRepository(private val context: Context) {
                 refreshInfo()
                 setBusy(null)
                 setProgress(null)
+                note("sync done: downloaded=${result.downloaded} deleted=${result.deleted} bytes=${result.bytes} failed=${result.failed}")
                 "همگام شد — ${result.downloaded} فایل دریافت، ${result.bytes / 1024} کیلوبایت"
             } catch (e: Exception) {
                 setBusy(null)
                 setProgress(null)
+                warn("sync failed: ${e.javaClass.simpleName}: ${e.message}")
                 setError("همگام‌سازی ناموفق: ${e.message ?: e.javaClass.simpleName}")
                 "همگام‌سازی ناموفق: ${e.message ?: e.javaClass.simpleName}"
             }
@@ -184,7 +202,7 @@ class VaultRepository(private val context: Context) {
         withContext(Dispatchers.IO) {
             val rows = localRows(readLocalMeta()) ?: return@withContext "ابتدا یک‌بار همگام‌سازی کن."
             val config = config(readLocalMeta()) ?: return@withContext "کلیدهای S3 ذخیره نشده است."
-            val engine = SyncEngine(mirror, config)
+            val engine = SyncEngine(mirror, config, log = ::warn)
             val state = mirror.loadState()
             setBusy("دریافت همهٔ فایل‌ها…")
             return@withContext try {
@@ -223,7 +241,9 @@ class VaultRepository(private val context: Context) {
         withContext(Dispatchers.Default) {
             val metaFile = mirror.resolve(VaultPaths.META_FILE)
             if (!metaFile.isFile) {
-                setError("فایل متادیتا پیدا نشد؛ اول همگام‌سازی کن.")
+                val message = "فایل متادیتا پیدا نشد؛ اول همگام‌سازی کن."
+                warn("unlock: $message (${metaFile.absolutePath})")
+                setError(message)
                 return@withContext false
             }
             setBusy("باز کردن قفل… (Argon2id)")
@@ -234,6 +254,8 @@ class VaultRepository(private val context: Context) {
                 if (!ir.maxv.securevault.core.Blob.checkCanary(key, meta.canary)) {
                     key.fill(0)
                     setBusy(null)
+                    // Only the fact is logged, never the password or any derived material.
+                    warn("unlock: canary mismatch (kdf=${meta.kdf.algo})")
                     setError("گذرواژه نادرست است.")
                     return@withContext false
                 }
@@ -247,10 +269,12 @@ class VaultRepository(private val context: Context) {
                 true
             } catch (e: KdfUnavailable) {
                 setBusy(null)
+                warn("unlock: ${e.message}")
                 setError("این والت با الگوریتم پشتیبانی‌نشده ساخته شده است (${e.message}).")
                 false
             } catch (e: Exception) {
                 setBusy(null)
+                warn("unlock failed: ${e.javaClass.simpleName}: ${e.message}")
                 setError("باز کردن قفل ناموفق: ${e.message ?: e.javaClass.simpleName}")
                 false
             }
@@ -317,7 +341,7 @@ class VaultRepository(private val context: Context) {
 
     suspend fun downloadRow(row: VaultRow): Boolean = withContext(Dispatchers.IO) {
         val config = config(session?.meta) ?: return@withContext false
-        val engine = SyncEngine(mirror, config)
+        val engine = SyncEngine(mirror, config, log = ::warn)
         val ok = engine.downloadOne(row)
         if (ok) {
             val state = mirror.loadState()
@@ -466,5 +490,10 @@ class VaultRepository(private val context: Context) {
             .put("bytes", mirror.sizeBytes())
             .put("sample", json)
             .toString(2)
+    }
+
+    companion object {
+        /** `adb logcat -s SecureVault` */
+        const val TAG = "SecureVault"
     }
 }
