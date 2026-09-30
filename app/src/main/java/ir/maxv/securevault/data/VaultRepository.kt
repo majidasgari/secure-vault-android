@@ -2,9 +2,11 @@ package ir.maxv.securevault.data
 
 import android.content.Context
 import android.util.Log
+import ir.maxv.securevault.core.AppStage
 import ir.maxv.securevault.core.KdfUnavailable
 import ir.maxv.securevault.core.KeyDerivation
 import ir.maxv.securevault.core.S3Config
+import ir.maxv.securevault.core.StageLogic
 import ir.maxv.securevault.core.SyncState
 import ir.maxv.securevault.core.VaultMeta
 import ir.maxv.securevault.core.VaultPaths
@@ -20,8 +22,6 @@ import org.json.JSONObject
 import java.io.File
 
 /** Which surface the app should show. */
-enum class Stage { SETUP, LOCKED, UNLOCKED }
-
 /** Everything the UI wants to know about the local mirror and its vault. */
 data class VaultInfo(
     val vaultId: String,
@@ -39,7 +39,7 @@ data class VaultInfo(
 )
 
 data class AppState(
-    val stage: Stage = Stage.SETUP,
+    val stage: AppStage = AppStage.SETUP,
     val settings: LocalSettings = LocalSettings(),
     val hasCredentials: Boolean = false,
     val info: VaultInfo? = null,
@@ -81,16 +81,30 @@ class VaultRepository(private val context: Context) {
     fun bootstrap() {
         val settings = mirror.loadSettings()
         val hasCreds = mirror.loadCredentials() != null
-        val stage = when {
-            !mirror.hasMetadata() -> Stage.SETUP
-            else -> Stage.LOCKED
-        }
+        val stage = StageLogic.stage(hasVaultMetadata = mirror.hasMetadata(), hasOpenSession = false)
         _state.value = _state.value.copy(
             stage = stage,
             settings = settings,
             hasCredentials = hasCreds,
             info = if (mirror.hasMetadata()) readInfoWithoutNotes() else null,
         )
+    }
+
+    /**
+     * Let the mirror decide which screen the app belongs on.
+     *
+     * The stage was only ever computed at startup, so a *successful* first sync left the app sitting
+     * on the setup form until it was restarted, even though the vault was already on the device.
+     * Every path that changes what the mirror holds (sync, unlock, lock, wipe) comes through here.
+     */
+    private fun syncStage() {
+        val stage = StageLogic.stage(
+            hasVaultMetadata = mirror.hasMetadata(),
+            hasOpenSession = session != null,
+        )
+        if (_state.value.stage != stage) {
+            _state.value = _state.value.copy(stage = stage, info = readInfoWithoutNotes())
+        }
     }
 
     fun saveSetup(settings: LocalSettings, accessKey: String?, secretKey: String?) {
@@ -185,6 +199,7 @@ class VaultRepository(private val context: Context) {
                 refreshInfo()
                 setBusy(null)
                 setProgress(null)
+                syncStage()
                 note("sync done: downloaded=${result.downloaded} deleted=${result.deleted} bytes=${result.bytes} failed=${result.failed}")
                 "همگام شد — ${result.downloaded} فایل دریافت، ${result.bytes / 1024} کیلوبایت"
             } catch (e: Exception) {
@@ -264,7 +279,7 @@ class VaultRepository(private val context: Context) {
                 session = active
                 setBusy(null)
                 setError(null)
-                _state.value = _state.value.copy(stage = Stage.UNLOCKED)
+                syncStage()
                 refreshInfo()
                 true
             } catch (e: KdfUnavailable) {
@@ -285,7 +300,8 @@ class VaultRepository(private val context: Context) {
         session?.close()
         session = null
         File(workDir, "store.dec").delete()
-        _state.value = _state.value.copy(stage = Stage.LOCKED, error = null, notice = null)
+        _state.value = _state.value.copy(error = null, notice = null)
+        syncStage()
     }
 
     fun onBackgrounded() {
@@ -372,8 +388,11 @@ class VaultRepository(private val context: Context) {
         mirror.clearCredentials()
         mirror.saveState(SyncState())
         File(workDir, "store.dec").delete()
-        _state.value = AppState(stage = Stage.SETUP)
+        _state.value = AppState(stage = AppStage.SETUP)
     }
+
+    /** True once the vault's own metadata is on the device (i.e. a sync has landed). */
+    fun hasLocalVault(): Boolean = mirror.hasMetadata()
 
     fun refreshInfo() {
         _state.value = _state.value.copy(info = readInfo())

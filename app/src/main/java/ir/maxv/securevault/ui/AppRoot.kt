@@ -33,7 +33,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import ir.maxv.securevault.core.VaultPaths
-import ir.maxv.securevault.data.Stage
+import ir.maxv.securevault.core.AppStage
 
 /** The whole app shell: which screen, the top bar, the snackbar and the breadcrumb of routes. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,7 +62,7 @@ fun AppRoot(viewModel: VaultViewModel) {
                 snackbarHost = { SnackbarHost(snackbar) },
                 containerColor = MaterialTheme.colorScheme.background,
                 topBar = {
-                    if (state.stage == Stage.UNLOCKED) {
+                    if (state.stage == AppStage.UNLOCKED) {
                         TopAppBar(
                             colors = TopAppBarDefaults.topAppBarColors(
                                 containerColor = MaterialTheme.colorScheme.surface,
@@ -104,7 +104,7 @@ fun AppRoot(viewModel: VaultViewModel) {
                     color = MaterialTheme.colorScheme.background,
                 ) {
                     when (state.stage) {
-                        Stage.SETUP -> SetupScreen(
+                        AppStage.SETUP -> SetupScreen(
                             initial = state.settings,
                             hasCredentials = state.hasCredentials,
                             busy = state.busy,
@@ -120,7 +120,7 @@ fun AppRoot(viewModel: VaultViewModel) {
                             onDismissError = viewModel::consumeMessage,
                         )
 
-                        Stage.LOCKED -> UnlockScreen(
+                        AppStage.LOCKED -> UnlockScreen(
                             info = state.info,
                             busy = state.busy,
                             progress = state.progress,
@@ -131,7 +131,7 @@ fun AppRoot(viewModel: VaultViewModel) {
                             onDismissError = viewModel::consumeMessage,
                         )
 
-                        Stage.UNLOCKED -> Box(Modifier.fillMaxSize()) {
+                        AppStage.UNLOCKED -> Box(Modifier.fillMaxSize()) {
                             when (val current = route) {
                                 is Route.Folder -> {
                                     val children = remember(
@@ -217,7 +217,7 @@ fun AppRoot(viewModel: VaultViewModel) {
                 )
             }
 
-            BackHandler(enabled = state.stage == Stage.UNLOCKED && !viewModel.atRoot()) {
+            BackHandler(enabled = state.stage == AppStage.UNLOCKED && !viewModel.atRoot()) {
                 viewModel.back()
             }
         }
