@@ -54,6 +54,15 @@ class SyncEngine(
         return relative
     }
 
+    /**
+     * The bucket key of a vault-relative path.
+     *
+     * The mirror keeps a vault's *relative* paths while the bucket holds them under `prefix`, so
+     * every object read has to go through here. Passing the relative path straight to the client
+     * asks for an object one level too high — a 404 that a download reports as "nothing to fetch".
+     */
+    private fun keyOf(relative: String): String = VaultPaths.objectKey(prefix, relative)
+
     /** List the bucket once and return `relative path → object`. */
     fun listRemote(): Map<String, S3Object> {
         val out = LinkedHashMap<String, S3Object>()
@@ -79,9 +88,9 @@ class SyncEngine(
         val remote = listRemote()
         val metadata = remote.filterKeys { it in VaultPaths.METADATA_FILES }
         val metaObject = metadata[VaultPaths.META_FILE]
-            ?: throw VaultNotInBucket("no vault found under prefix '${prefix.trimEnd('/')}'")
+            ?: throw VaultNotInBucket("در مسیر «${prefix.trimEnd('/')}» والت پیدا نشد.")
         if (!metadata.containsKey(VaultPaths.META_DB) || !metadata.containsKey(VaultPaths.STORE_FILE)) {
-            throw VaultNotInBucket("the bucket mirror is incomplete (meta.sqlite / secure.store missing)")
+            throw VaultNotInBucket("آینهٔ باکت ناقص است (meta.sqlite یا secure.store نیست).")
         }
 
         val local = state.all()
@@ -95,7 +104,7 @@ class SyncEngine(
         for ((position, relative) in plan.downloads.withIndex()) {
             onProgress(SyncProgress("metadata", position, total, relative, bytes))
             val written = try {
-                client().download(relative, mirror.resolve(relative))
+                client().download(keyOf(relative), mirror.resolve(relative))
             } catch (e: S3Exception) {
                 failed.add(relative)
                 null
@@ -105,7 +114,7 @@ class SyncEngine(
             }
             val obj = metadata[relative]
             when {
-                written == null -> Unit
+                written == null -> failed.add(relative)
                 else -> {
                     bytes += written
                     downloaded++
@@ -121,7 +130,12 @@ class SyncEngine(
             deleted++
         }
 
-        val meta = VaultMeta.parse(mirror.readText(VaultPaths.META_FILE) ?: throw VaultNotInBucket("empty .vault-meta.json"))
+        val metaText = mirror.readText(VaultPaths.META_FILE)
+            ?: throw VaultNotInBucket(
+                "فایل فرادادهٔ والت دریافت نشد (کلید «${keyOf(VaultPaths.META_FILE)}»" +
+                    if (failed.isEmpty()) ")." else "، ناموفق‌ها: ${failed.joinToString("، ")})."
+            )
+        val meta = VaultMeta.parse(metaText)
         onProgress(SyncProgress("metadata", total, total, "", bytes))
         return meta to SyncResult(downloaded, deleted, plan.unchanged, bytes, failed)
     }
@@ -147,7 +161,7 @@ class SyncEngine(
             val relative = VaultPaths.blobPath(blobId)
             onProgress(SyncProgress(phase, position, pending.size, row.path, bytes))
             try {
-                val written = client().download(relative, mirror.resolve(relative))
+                val written = client().download(keyOf(relative), mirror.resolve(relative))
                 if (written != null) {
                     bytes += written
                     downloaded++
@@ -165,7 +179,7 @@ class SyncEngine(
         val blobId = row.blobId ?: return false
         val relative = VaultPaths.blobPath(blobId)
         return try {
-            client().download(relative, mirror.resolve(relative)) != null
+            client().download(keyOf(relative), mirror.resolve(relative)) != null
         } catch (e: Exception) {
             false
         }

@@ -85,6 +85,20 @@ class S3AndSyncTest {
     }
 
     @Test
+    fun `bucket keys always carry the sync prefix`() {
+        // the regression that broke the first device run: relative paths were sent to S3 as-is,
+        // asking for an object one level above the vault (a silent 404)
+        assertEquals("sync/.vault-meta.json", VaultPaths.objectKey("sync/", ".vault-meta.json"))
+        assertEquals("sync/meta.sqlite", VaultPaths.objectKey("sync", "meta.sqlite"))
+        assertEquals("sync/files/ab/abcdef.enc", VaultPaths.objectKey("sync/", VaultPaths.blobPath("abcdef")))
+        assertEquals("a/b/x.enc", VaultPaths.objectKey("", "a/b/x.enc"))
+        assertEquals("deep/pre/fix/x.md", VaultPaths.objectKey("/deep/pre/fix/", "/x.md"))
+        // never a doubled slash, whatever the caller passes
+        assertFalse(VaultPaths.objectKey("sync/", "/x.md").contains("//"))
+        assertFalse(VaultPaths.objectKey("/sync", "x.md").contains("//"))
+    }
+
+    @Test
     fun `derived and runtime files are never mirrored`() {
         assertTrue(VaultPaths.isExcluded("semantic/semantic.db"))
         assertTrue(VaultPaths.isExcluded("x/cache/y"))

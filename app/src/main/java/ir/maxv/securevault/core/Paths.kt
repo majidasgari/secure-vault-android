@@ -51,6 +51,21 @@ object VaultPaths {
     fun join(folder: String, name: String): String =
         if (folder.isEmpty()) name else folder.trimEnd('/') + "/" + name
 
+    /**
+     * The bucket key of a vault-relative path.
+     *
+     * The local mirror holds a vault's relative paths (`files/aa/x.enc`, `.vault-meta.json`) while
+     * the bucket holds the same tree under the sync prefix (`sync/files/aa/x.enc`). Object reads
+     * must always be built here: handing the relative path to the S3 client asks for an object one
+     * level above the vault, which comes back as a 404 and looks like "nothing to download".
+     */
+    fun objectKey(prefix: String, relative: String): String {
+        val cleanPrefix = prefix.trimStart('/')
+        val cleanRelative = relative.trimStart('/')
+        if (cleanPrefix.isEmpty()) return cleanRelative
+        return if (cleanPrefix.endsWith("/")) cleanPrefix + cleanRelative else "$cleanPrefix/$cleanRelative"
+    }
+
     /** Depth of a path (a top-level entry is depth 1). */
     fun depth(path: String): Int = path.split('/').count { it.isNotEmpty() }
 

@@ -5,6 +5,7 @@ import ir.maxv.securevault.core.S3Config
 import ir.maxv.securevault.core.SyncPlanner
 import ir.maxv.securevault.core.VaultPaths
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -56,10 +57,17 @@ class S3LiveTest {
             .filter { SyncPlanner.eligible(it) }
         assertTrue("no eligible vault members", vaultMembers.isNotEmpty())
 
-        val metaBytes = client.get("${config.normalizedPrefix()}${VaultPaths.META_FILE}")
+        // the key rule the device run broke: metadata lives *under* the prefix
+        val metaBytes = client.get(VaultPaths.objectKey(config.normalizedPrefix(), VaultPaths.META_FILE))
         assertNotNull("vault metadata not readable", metaBytes)
         val metaText = String(metaBytes!!, Charsets.UTF_8)
         assertTrue(metaText.contains("vault_id"))
         assertTrue(metaText.contains("kdf"))
+
+        // and the relative path alone must NOT resolve — that is the bug this pins down
+        assertNull(
+            "a relative key resolved against the bucket root",
+            client.get(VaultPaths.META_FILE),
+        )
     }
 }
