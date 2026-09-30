@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "vault_id": "94115409f4144e08938504e58a9ac346",
+  "created_at": 1790750752201,
+  "kdf": {
+    "algo": "pbkdf2-sha512",
+    "salt_b64": "/NEpb50HKc3ZA/7nys/7bg==",
+    "time_cost": 0,
+    "memory_kib": 0,
+    "parallelism": 0,
+    "iterations": 600000
+  },
+  "canary_b64": "U1ZMVAEBAAAQWTfXx8UBkYq0ueaz8LjnBCVZMQLrFMvn1lpwtM2NjpUlRpzmrad3scvI8aAlmULouzPgNtnIiA==",
+  "settings": {
+    "plain_threshold_bytes": 10485760,
+    "auto_lock_seconds": 0,
+    "default_sensitivity": "normal",
+    "semantic": {
+      "enabled": false
+    },
+    "sync": {
+      "enabled": true,
+      "bucket": "test-bucket",
+      "prefix": "sync",
+      "endpoint": "https://s3.example.com",
+      "region": "test-region-1"
+    },
+    "language": "fa"
+  }
+}

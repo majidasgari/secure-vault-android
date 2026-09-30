@@ -1,0 +1,70 @@
+{
+ "password": "correct horse battery staple",
+ "kdf_algo": "pbkdf2-sha512",
+ "files": [
+  {
+   "path": "یادداشت‌ها/سفر.md",
+   "blob_id": "6abecec733a843bfa7cdd39e7a48d2c8",
+   "sensitivity": "normal",
+   "size": 374,
+   "text": "# سفر به شمال\n\nسه روز با گلزار رفتیم. هوای بارانی و جادهٔ چالوس.\n\n## خریدها\n\n- چادر\n- چراغ قوه\n\n1. بلیت\n2. سوغاتی\n\n> یادم باشد یخساز را هم بیاوریم.\n\n```bash\nssh -p 5233 najm@example\n```\n\n    نقشه: /data/Downloads/map.png\n\n| روز | جا |\n|---|---|\n| یک | رامسر |\n",
+   "sha256": "acbc951053242657979a06ffb40c6d63f4e3c42c6a7870fa55fdf0c3630e89d5",
+   "blob_sha256": "57de09b61018de16158caa41dc0d0ccfc25f4c17ef6e488c0ee9ecc4a8ba1e7c"
+  },
+  {
+   "path": "برنامه‌نویسی/استفاده از NFS.md",
+   "blob_id": "a584b364bf6548a39b5236c645cb7b53",
+   "sensitivity": "normal",
+   "size": 238,
+   "text": "برای اشتراک فایل:\n\n    1. روی سرور:\n\n    ```bash\n    apt install nfs-kernel-server\n    ```\n\n    2. روی کلاینت:\n\n    ```bash\n    mount -t nfs host:/srv/nfs /mnt\n    ```\n\nمتن لاتین stays left to right.\n",
+   "sha256": "5e235626c613a0ce8e3b5c2a8d76ea0b2f86e2d5f2d0c2487f4f3634f675cd01",
+   "blob_sha256": "527c20edd01678705b25e3396e752860b15d428a7c41c929bcb16f06980b101b"
+  },
+  {
+   "path": "کار/رمز نمونه.md",
+   "blob_id": "3885869e035b4e9e8a39fe753122e9e4",
+   "sensitivity": "secretfile",
+   "size": 76,
+   "text": "کارت بلوبانک\nشماره: 0000-0000-0000-0000\nرمز دوم: 9999\n",
+   "sha256": "5bc043e0efc59230e9c8e1f6212aa1f5fce8180961b8ec9e4cc1bb9127bf997b",
+   "blob_sha256": "dad9a848ed48af4f7df2c6716e09edcb5bb7db62e4d3bd0eb40969c3543c7ab7"
+  }
+ ],
+ "folder_notes": {
+  "": "**گنجینه** — نقشهٔ ریشه.\n\n- یادداشت‌ها\n- برنامه‌نویسی\n- کار\n",
+  "یادداشت‌ها": "یادداشت‌های شخصی روزانه.\n\nکی استفاده شود: برای مرور سفرها و رخدادها.\n",
+  "برنامه‌نویسی": "فن‌آوری‌ها و دستورها.\n"
+ },
+ "file_notes": {
+  "یادداشت‌ها/سفر.md": "خلاصهٔ سفر شمال — برای مرور خریدها.",
+  "برنامه‌نویسی/استفاده از NFS.md": "روش سوار کردن NFS روی کلاینت و سرور."
+ },
+ "tags": {
+  "یادداشت‌ها/سفر.md": [
+   "سفر",
+   "گلزار"
+  ],
+  "برنامه‌نویسی/استفاده از NFS.md": [
+   "نصب",
+   "سرور"
+  ],
+  "_note": "tags are attached to file rows"
+ },
+ "sigv4": {
+  "secret": "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+  "access": "AKIAIOSFODNN7EXAMPLE",
+  "region": "s3.ir-thr-at1",
+  "datestamp": "20260930",
+  "amz_date": "20260930T120000Z",
+  "method": "GET",
+  "path": "/majid-secure-vault/sync/files/0a/0a1b2c3d.enc",
+  "query": "list-type=2&prefix=sync%2F",
+  "payload_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "canonical_request": "GET\n/majid-secure-vault/sync/files/0a/0a1b2c3d.enc\nlist-type=2&prefix=sync%2F\nhost:s3.ir-thr-at1.arvanstorage.ir\nx-amz-content-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nx-amz-date:20260930T120000Z\n\nhost;x-amz-content-sha256;x-amz-date\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "string_to_sign": "AWS4-HMAC-SHA256\n20260930T120000Z\n20260930/s3.ir-thr-at1/s3/aws4_request\nf6125bc09c8b14eb7c61e2456405a4928333b2e9aed3f06ef5f2e50277ad2bbc",
+  "scope": "20260930/s3.ir-thr-at1/s3/aws4_request",
+  "signing_key_hex": "bec1290209bd3c5ce8c4ccdbd267653ac0d752a70cbdc001b058fb2f7e67ae6e",
+  "signature": "2ccfcc8208dd23ff46197a080964156867ab33ab63cb9c2d918b6b76f383a1f7",
+  "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20260930/s3.ir-thr-at1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=2ccfcc8208dd23ff46197a080964156867ab33ab63cb9c2d918b6b76f383a1f7"
+ }
+}
