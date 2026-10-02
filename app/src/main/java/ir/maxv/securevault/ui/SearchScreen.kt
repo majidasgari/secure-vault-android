@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -44,6 +45,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import ir.maxv.securevault.core.Labels
 import ir.maxv.securevault.core.PersianText
 import ir.maxv.securevault.data.SearchOutcome
 import ir.maxv.securevault.data.SearchResult
@@ -91,6 +93,12 @@ fun SearchScreen(
                     Text("جست‌وجو")
                 }
             }
+            Text(
+                "محتوای فایل‌های محرمانه جست‌وجو نمی‌شود؛ اگر عنوانشان بخورد، همان عنوان نشان داده می‌شود " +
+                    "و متن را با تأیید صریح در خودِ یادداشت می‌بینی.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             if (searching) {
                 progress?.let { p ->
                     LinearProgressIndicator(
@@ -119,7 +127,7 @@ fun SearchScreen(
                             style = MaterialTheme.typography.bodySmall,
                         )
                         TextButton(onClick = onDownloadAll) {
-                            Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.height(16.dp))
+                            Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("دریافت یادداشت‌های متنی")
                         }
@@ -127,7 +135,17 @@ fun SearchScreen(
                 }
             }
             Text(
-                "${outcome.results.size} نتیجه در ${outcome.scanned} یادداشت (${outcome.elapsedMs} میلی‌ثانیه)",
+                "${outcome.results.size} نتیجه در ${outcome.scanned} یادداشت (${outcome.elapsedMs} میلی‌ثانیه)" +
+                    if (!outcome.titlesOnly && outcome.titleOnly > 0) {
+                        " — ${outcome.titleOnly} مورد فقط با عنوان پیدا شد"
+                    } else {
+                        ""
+                    } +
+                    if (outcome.skipped > 0) {
+                        " — ${outcome.skipped} یادداشت بزرگ‌تر از ۴ مگابایت بود و اسکن نشد"
+                    } else {
+                        ""
+                    },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
@@ -156,17 +174,26 @@ private fun ResultRow(result: SearchResult, query: String, onClick: () -> Unit) 
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    result.title,
+                    if (result.titleOnly) highlight(Labels.withEmoji(result.title, result.row.emoji), query)
+                    else AnnotatedString(Labels.withEmoji(result.title, result.row.emoji)),
                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
                     maxLines = 1,
                     modifier = Modifier.weight(1f),
                 )
+                if (result.titleOnly) {
+                    Text(
+                        "فقط عنوان",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
                 if (result.row.isSecret) {
                     Icon(
                         Icons.Filled.Lock,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.height(14.dp),
+                        modifier = Modifier.size(14.dp),
                     )
                     Spacer(Modifier.width(6.dp))
                 }
@@ -182,28 +209,42 @@ private fun ResultRow(result: SearchResult, query: String, onClick: () -> Unit) 
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
             )
-            HighlightedSnippet(result.snippet, query)
+            when {
+                // The body of a secret file is never decrypted for a search, so there is no snippet
+                // to show — saying so beats an empty box the user would read as "no match".
+                result.titleOnly && result.row.isSecret ->
+                    Text(
+                        "محتوای این فایل محرمانه است و جست‌وجو نمی‌شود؛ عنوانش خورده است.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                result.titleOnly -> Unit
+
+                else -> HighlightedSnippet(result.snippet, query)
+            }
+        }
+    }
+}
+
+/** The snippet with every hit painted, used for the body and for title-only hits. */
+private fun highlight(text: String, query: String): AnnotatedString = buildAnnotatedString {
+    append(text)
+    ir.maxv.securevault.core.LiteralSearch.findAll(text, query, maxHits = 40).forEach { hit ->
+        val end = (hit.offset + hit.length).coerceAtMost(text.length)
+        if (hit.offset < end) {
+            addStyle(
+                SpanStyle(background = HighlightColor, fontWeight = FontWeight.Bold),
+                hit.offset,
+                end,
+            )
         }
     }
 }
 
 @Composable
 private fun HighlightedSnippet(snippet: String, query: String) {
-    val annotated: AnnotatedString = remember(snippet, query) {
-        buildAnnotatedString {
-            append(snippet)
-            ir.maxv.securevault.core.LiteralSearch.findAll(snippet, query, maxHits = 40).forEach { hit ->
-                val end = (hit.offset + hit.length).coerceAtMost(snippet.length)
-                if (hit.offset < end) {
-                    addStyle(
-                        SpanStyle(background = HighlightColor, fontWeight = FontWeight.Bold),
-                        hit.offset,
-                        end,
-                    )
-                }
-            }
-        }
-    }
+    val annotated: AnnotatedString = remember(snippet, query) { highlight(snippet, query) }
     Text(
         annotated,
         style = MaterialTheme.typography.bodyMedium,

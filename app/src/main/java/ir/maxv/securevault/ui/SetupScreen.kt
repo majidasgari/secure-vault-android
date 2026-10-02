@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -159,20 +160,22 @@ fun SetupScreen(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(
-                enabled = busy == null,
-                onClick = { onTest(settings(), access.trim(), secret.trim()) },
-            ) { Text("تست اتصال") }
-            Button(
-                enabled = busy == null,
-                onClick = { onSync(settings(), access.trim(), secret.trim()) },
-            ) {
-                Icon(Icons.Filled.CloudDownload, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("ذخیره و همگام‌سازی")
-            }
+        // Stacked and full width: side by side, «ذخیره و همگام‌سازی» was the button that got
+        // squeezed on a narrow phone until its label wrapped.
+        Button(
+            enabled = busy == null,
+            onClick = { onSync(settings(), access.trim(), secret.trim()) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("ذخیره و همگام‌سازی")
         }
+        OutlinedButton(
+            enabled = busy == null,
+            onClick = { onTest(settings(), access.trim(), secret.trim()) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("تست اتصال") }
 
         if (busy != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -290,7 +291,7 @@ private fun CodeBlock(block: MdBlock.Code) {
                 )
             }
             TextButton(onClick = { clipboard.setText(AnnotatedString(block.code)) }) {
-                Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.height(16.dp))
+                Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("رونوشت", style = MaterialTheme.typography.bodySmall)
             }
@@ -350,7 +351,7 @@ private fun VaultImage(
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = { onNeedImage(url) }) {
-                Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.height(16.dp))
+                Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("دریافت", style = MaterialTheme.typography.bodySmall)
             }

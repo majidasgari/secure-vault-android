@@ -3,8 +3,10 @@ package ir.maxv.securevault.data
 import android.content.Context
 import android.util.Log
 import ir.maxv.securevault.core.AppStage
+import ir.maxv.securevault.core.BiometricRecord
 import ir.maxv.securevault.core.KdfUnavailable
 import ir.maxv.securevault.core.KeyDerivation
+import ir.maxv.securevault.core.RecentList
 import ir.maxv.securevault.core.S3Config
 import ir.maxv.securevault.core.StageLogic
 import ir.maxv.securevault.core.SyncState
@@ -20,6 +22,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import javax.crypto.Cipher
 
 /** Which surface the app should show. */
 /** Everything the UI wants to know about the local mirror and its vault. */
@@ -47,6 +50,23 @@ data class AppState(
     val busy: String? = null,
     val error: String? = null,
     val notice: String? = null,
+    /** How the fingerprint route stands on this device. */
+    val biometric: BiometricState = BiometricState.UNAVAILABLE,
+    /** True right after a password unlock when we may offer to turn the fingerprint route on. */
+    val offerBiometric: Boolean = false,
+)
+
+/** One entry of the "recently opened" list, resolved against the open vault. */
+data class RecentItem(
+    val path: String,
+    val title: String,
+    val parent: String,
+    val isSecret: Boolean,
+    val downloaded: Boolean,
+    val openedAt: Long,
+    val opens: Int,
+    /** The vault's emoji label for this path, when it has one. */
+    val emoji: String? = null,
 )
 
 /**
@@ -66,6 +86,8 @@ class VaultRepository(private val context: Context) {
     private fun warn(message: String) = Log.w(TAG, message)
 
     private val mirror = LocalMirror(context)
+    private val biometric = BiometricUnlockStore(context)
+    private val recent = RecentFilesStore(context)
     private val workDir = File(context.cacheDir, "work")
     private val mutex = Mutex()
     private val _state = MutableStateFlow(AppState())
@@ -87,6 +109,28 @@ class VaultRepository(private val context: Context) {
             settings = settings,
             hasCredentials = hasCreds,
             info = if (mirror.hasMetadata()) readInfoWithoutNotes() else null,
+        )
+        refreshBiometric()
+    }
+
+    /**
+     * Re-read how the fingerprint route stands.
+     *
+     * A record whose keystore key the system invalidated (the enrolled fingerprints changed) can
+     * never be opened again, so it is dropped here rather than left to fail at the sensor, and the
+     * user is told why in one line.
+     */
+    fun refreshBiometric() {
+        var status = biometric.state()
+        if (status == BiometricState.STALE) {
+            warn("biometric record invalidated by the system (fingerprints changed) — dropping it")
+            biometric.clear()
+            status = biometric.state()
+            setError("کلید اثر انگشت با تغییر اثر انگشت‌های دستگاه باطل شد؛ یک‌بار با گذرواژه باز کن و دوباره فعال کن.")
+        }
+        _state.value = _state.value.copy(
+            biometric = status,
+            offerBiometric = _state.value.offerBiometric && status == BiometricState.OFF,
         )
     }
 
@@ -281,6 +325,7 @@ class VaultRepository(private val context: Context) {
                 setError(null)
                 syncStage()
                 refreshInfo()
+                offerFingerprintIfUseful()
                 true
             } catch (e: KdfUnavailable) {
                 setBusy(null)
@@ -300,8 +345,126 @@ class VaultRepository(private val context: Context) {
         session?.close()
         session = null
         File(workDir, "store.dec").delete()
-        _state.value = _state.value.copy(error = null, notice = null)
+        _state.value = _state.value.copy(error = null, notice = null, offerBiometric = false)
+        refreshBiometric()
         syncStage()
+    }
+
+    // ── fingerprint unlock (device-local, opt-in) ──────────────────────────────────
+    /**
+     * Offer the fingerprint route once, right after a *successful* password unlock.
+     *
+     * Nothing is asked before the user has proved they hold the password, and the offer disappears
+     * for good once the record exists — the password can always be used instead.
+     */
+    private fun offerFingerprintIfUseful() {
+        refreshBiometric()
+        if (_state.value.biometric == BiometricState.OFF) {
+            _state.value = _state.value.copy(offerBiometric = true)
+        }
+    }
+
+    fun dismissBiometricOffer() {
+        _state.value = _state.value.copy(offerBiometric = false)
+    }
+
+    /** A cipher to seal the master key with; the prompt must authorize it before [enableBiometric]. */
+    fun biometricEncryptCipher(): Cipher? = biometric.encryptCipher()
+
+    /** A cipher to read the sealed record with; the prompt must authorize it before [unlockWithBiometric]. */
+    fun biometricDecryptCipher(): Cipher? = biometric.decryptCipher()
+
+    /** Seal the running session's master key into the device keystore record. */
+    suspend fun enableBiometric(cipher: Cipher): Boolean = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val active = session
+            if (active == null) {
+                setError("برای فعال‌کردن اثر انگشت، اول گنجینه را با گذرواژه باز کن.")
+                return@withContext false
+            }
+            val key = active.keyCopy()
+            if (key == null) {
+                setError("کلید گنجینه در این نشست پیدا نشد؛ دوباره باز کن.")
+                return@withContext false
+            }
+            val sealed = try {
+                biometric.write(cipher, BiometricRecord(active.meta.vaultId, key))
+            } finally {
+                // the record holds its own copy; this one is ours to destroy
+                key.fill(0)
+            }
+            if (!sealed) {
+                warn("biometric: sealing the master key failed")
+                setError("ذخیرهٔ کلید اثر انگشت ناموفق بود.")
+                return@withContext false
+            }
+            note("biometric unlock enabled (vault=${active.meta.vaultId.take(8)})")
+            _state.value = _state.value.copy(offerBiometric = false)
+            refreshBiometric()
+            true
+        }
+    }
+
+    /**
+     * Open the vault from the sealed record instead of the password.
+     *
+     * Three things can go wrong and each is handled as "use the password": the sensor is bypassed
+     * (no cipher), the record belongs to another vault / a recreated vault, or the key does not
+     * decrypt the canary. In the last two the record is dropped, because it can never be good again.
+     */
+    suspend fun unlockWithBiometric(cipher: Cipher): Boolean = mutex.withLock {
+        withContext(Dispatchers.Default) {
+            val metaFile = mirror.resolve(VaultPaths.META_FILE)
+            if (!metaFile.isFile) {
+                val message = "فایل متادیتا پیدا نشد؛ اول همگام‌سازی کن."
+                warn("biometric unlock: $message")
+                setError(message)
+                return@withContext false
+            }
+            setBusy("باز کردن قفل… (اثر انگشت)")
+            try {
+                val meta = VaultMeta.parse(metaFile.readText(Charsets.UTF_8))
+                val record = biometric.read(cipher)
+                if (record == null) {
+                    setBusy(null)
+                    warn("biometric unlock: no readable record")
+                    refreshBiometric()
+                    setError("خواندن کلید اثر انگشت ناموفق بود؛ با گذرواژه باز کن.")
+                    return@withContext false
+                }
+                if (!record.matches(meta)) {
+                    record.masterKey.fill(0)
+                    biometric.clear()
+                    setBusy(null)
+                    warn("biometric unlock: record does not belong to this vault")
+                    refreshBiometric()
+                    setError("کلید اثر انگشت با این گنجینه نمی‌خواند؛ با گذرواژه باز کن.")
+                    return@withContext false
+                }
+                val active = openSession(meta, record.masterKey)
+                session?.close()
+                session = active
+                setBusy(null)
+                setError(null)
+                syncStage()
+                refreshInfo()
+                refreshBiometric()
+                note("unlocked with fingerprint")
+                true
+            } catch (e: Exception) {
+                setBusy(null)
+                warn("biometric unlock failed: ${e.javaClass.simpleName}: ${e.message}")
+                setError("باز کردن قفل با اثر انگشت ناموفق بود؛ با گذرواژه امتحان کن.")
+                false
+            }
+        }
+    }
+
+    /** Turn the fingerprint route off: the sealed record and its keystore key both go. */
+    fun disableBiometric() {
+        biometric.clear()
+        note("biometric unlock disabled")
+        refreshBiometric()
     }
 
     fun onBackgrounded() {
@@ -380,15 +543,53 @@ class VaultRepository(private val context: Context) {
 
     fun notesMissingLocally(): Int = activeSession()?.missingTextCount() ?: 0
 
+    // ── recently opened (device-local) ────────────────────────────────────────────
+    /**
+     * The files opened on this device, newest first, resolved against the open vault.
+     *
+     * Entries whose file no longer exists are left out of the view (the desktop may have deleted or
+     * moved it); a stale row costs nothing and ages out of the bounded file by itself.
+     */
+    fun recentItems(limit: Int = RecentList.MAX_ENTRIES): List<RecentItem> {
+        val active = activeSession() ?: return emptyList()
+        return recent.load().take(limit).mapNotNull { entry ->
+            val row = active.index.row(entry.path)?.takeIf { !it.isDir } ?: return@mapNotNull null
+            RecentItem(
+                path = row.path,
+                title = row.title,
+                parent = VaultPaths.parentOf(row.path),
+                isSecret = row.isSecret,
+                downloaded = active.isDownloaded(row),
+                openedAt = entry.openedAt,
+                opens = entry.opens,
+                emoji = row.emoji,
+            )
+        }
+    }
+
+    /** Remember a note that was actually opened (never called for a folder). */
+    fun recordOpened(path: String) {
+        if (path.isBlank()) return
+        recent.record(path)
+    }
+
+    fun clearRecent() {
+        recent.clear()
+        note("recently-opened list cleared")
+    }
+
     // ── maintenance ───────────────────────────────────────────────────────────────
     fun wipeLocalCopy() {
         session?.close()
         session = null
+        biometric.clear()
+        recent.clear()
         mirror.clear()
         mirror.clearCredentials()
         mirror.saveState(SyncState())
         File(workDir, "store.dec").delete()
         _state.value = AppState(stage = AppStage.SETUP)
+        refreshBiometric()
     }
 
     /** True once the vault's own metadata is on the device (i.e. a sync has landed). */

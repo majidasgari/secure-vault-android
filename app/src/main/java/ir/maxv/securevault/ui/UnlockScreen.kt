@@ -15,6 +15,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
@@ -27,6 +28,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,19 +42,31 @@ import androidx.compose.ui.unit.dp
 import ir.maxv.securevault.data.SyncProgress
 import ir.maxv.securevault.data.VaultInfo
 
-/** The unlock screen: one password field, the vault's own parameters, and the sync button. */
+/** The unlock screen: fingerprint (when set up), one password field, the vault's parameters, sync. */
 @Composable
 fun UnlockScreen(
     info: VaultInfo?,
     busy: String?,
     progress: SyncProgress?,
     error: String?,
+    biometricEnabled: Boolean,
     onUnlock: (String) -> Unit,
+    onBiometricUnlock: () -> Unit,
     onSync: () -> Unit,
     onSettings: () -> Unit,
     onDismissError: () -> Unit,
 ) {
     var password by remember { mutableStateOf("") }
+
+    // Ask for the finger once every time this screen appears (a fresh lock, or coming back after
+    // the auto-lock timer), but never in a loop: the user can always fall back to the password.
+    var prompted by remember { mutableStateOf(false) }
+    LaunchedEffect(biometricEnabled) {
+        if (biometricEnabled && !prompted && busy == null) {
+            prompted = true
+            onBiometricUnlock()
+        }
+    }
 
     Column(
         Modifier
@@ -70,6 +84,23 @@ fun UnlockScreen(
         }
 
         info?.let { VaultInfoCard(it) }
+
+        if (biometricEnabled) {
+            Button(
+                enabled = busy == null,
+                onClick = onBiometricUnlock,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Filled.Fingerprint, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (busy != null) "در حال گشودن…" else "گشودن با اثر انگشت")
+            }
+            Text(
+                "یا گذرواژهٔ اصلی را بزن:",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         OutlinedTextField(
             value = password,
@@ -121,6 +152,15 @@ fun UnlockScreen(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        if (biometricEnabled) {
+            Text(
+                "اثر انگشت همین گوشی کلید گنجینه را نگه می‌دارد و پشت تأیید اثر انگشت قفل است؛ " +
+                    "اگر اثر انگشت‌های دستگاه عوض شود آن کلید باطل می‌شود و دوباره گذرواژه لازم است.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

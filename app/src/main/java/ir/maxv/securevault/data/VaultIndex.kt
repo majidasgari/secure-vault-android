@@ -1,7 +1,10 @@
 package ir.maxv.securevault.data
 
 import android.database.sqlite.SQLiteDatabase
+import android.util.Log
+import ir.maxv.securevault.core.Labels
 import ir.maxv.securevault.core.VaultPaths
+import ir.maxv.securevault.core.VaultSql
 import java.io.File
 import java.text.Collator
 import java.util.Locale
@@ -15,10 +18,15 @@ data class VaultRow(
     val size: Long,
     val sensitivity: String,
     val mtime: Long,
+    /** The vault's emoji label for this path (plaintext metadata, `null` on an older mirror). */
+    val emoji: String? = null,
 ) {
     val name: String get() = VaultPaths.nameOf(path)
     val title: String get() = if (isDir) name else VaultPaths.titleOf(path)
     val isSecret: Boolean get() = sensitivity != "normal"
+
+    /** What the lists show: the emoji label in front of the name, when the vault has one. */
+    val label: String get() = Labels.withEmoji(title, emoji)
 }
 
 /** A folder's or file's note (stored inside the encrypted `secure.store`). */
@@ -108,26 +116,23 @@ class VaultIndex(
     }
 
     companion object {
+        private const val TAG = "SecureVault"
+
         /** Read a metadata database. The caller owns the connection. */
         fun load(db: SQLiteDatabase): VaultIndex {
             val rows = ArrayList<VaultRow>()
-            db.rawQuery(
-                "SELECT id, logical_path, blob_id, is_dir, size, sensitivity, mtime FROM files",
-                null,
-            ).use { cursor ->
-                while (cursor.moveToNext()) {
-                    rows.add(
-                        VaultRow(
-                            id = cursor.getLong(0),
-                            path = cursor.getString(1) ?: "",
-                            blobId = cursor.getString(2),
-                            isDir = cursor.getInt(3) != 0,
-                            size = cursor.getLong(4),
-                            sensitivity = cursor.getString(5) ?: "normal",
-                            mtime = cursor.getLong(6),
-                        )
-                    )
-                }
+            // The mirror's schema is whatever the desktop pushed, so the query is built from the
+            // columns that actually exist (see VaultSql) instead of failing on a missing one.
+            val cols = columns(db, "files")
+            require(VaultSql.hasUsableKey(cols)) { VaultSql.unusableKeyMessage(cols) }
+            Log.i(TAG, "meta files columns: " + cols.sorted().joinToString(", "))
+            try {
+                readRows(db, VaultSql.filesSelect(cols), rows)
+            } catch (e: Exception) {
+                // A WITHOUT ROWID table has no rowid to stand in for a missing id.
+                Log.w(TAG, "files select failed, retrying with literals: ${e.message}")
+                rows.clear()
+                readRows(db, VaultSql.filesSelectWithoutRowId(cols), rows)
             }
             val tags = HashMap<Long, MutableList<String>>()
             try {
@@ -180,6 +185,41 @@ class VaultIndex(
             File(workDir, "$name-wal").delete()
             File(workDir, "$name-shm").delete()
             return target
+        }
+
+        /** Read `files` rows into `into`, in the order VaultSql.FILE_COLUMNS lists them. */
+        private fun readRows(db: SQLiteDatabase, sql: String, into: MutableList<VaultRow>) {
+            db.rawQuery(sql, null).use { cursor ->
+                while (cursor.moveToNext()) {
+                    into.add(
+                        VaultRow(
+                            id = cursor.getLong(0),
+                            path = cursor.getString(1) ?: "",
+                            blobId = cursor.getString(2),
+                            isDir = cursor.getInt(3) != 0,
+                            size = cursor.getLong(4),
+                            sensitivity = cursor.getString(5) ?: "normal",
+                            mtime = cursor.getLong(6),
+                            emoji = cursor.getString(7),
+                        )
+                    )
+                }
+            }
+        }
+
+        /** Columns of a table — used to stay compatible with an older mirror's schema. */
+        fun columns(db: SQLiteDatabase, table: String): Set<String> {
+            val names = HashSet<String>()
+            try {
+                db.rawQuery("PRAGMA table_info($table)", null).use { cursor ->
+                    while (cursor.moveToNext()) {
+                        names.add(cursor.getString(1) ?: "")
+                    }
+                }
+            } catch (e: Exception) {
+                // Unreadable schema: the caller falls back to the columns it knows.
+            }
+            return names
         }
     }
 }

@@ -192,7 +192,7 @@ private fun EntryRow(
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        row.title,
+                        row.label,
                         style = MaterialTheme.typography.bodyLarge,
                         maxLines = 1,
                         modifier = Modifier.weight(1f, fill = false),
@@ -252,7 +252,7 @@ fun NoteScreen(
         item {
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(view.row.title, style = MaterialTheme.typography.titleLarge)
+                    Text(view.row.label, style = MaterialTheme.typography.titleLarge)
                     Text(
                         view.row.path,
                         style = MaterialTheme.typography.bodySmall,
@@ -294,10 +294,13 @@ fun NoteScreen(
                                 "و در جست‌وجوی متنی هرگز نمی‌آید.",
                             style = MaterialTheme.typography.bodyMedium,
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(onClick = onReveal) { Text("نمایش") }
-                            OutlinedButton(onClick = onDownload) {
-                                Icon(Icons.Filled.Download, contentDescription = null)
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Button(onClick = onReveal, modifier = Modifier.weight(1f)) { Text("نمایش") }
+                            OutlinedButton(onClick = onDownload, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text("دریافت")
                             }

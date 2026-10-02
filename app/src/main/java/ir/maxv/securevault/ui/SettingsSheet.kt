@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -14,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -37,8 +39,63 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import ir.maxv.securevault.data.BiometricState
 import ir.maxv.securevault.data.LocalSettings
 import ir.maxv.securevault.data.VaultInfo
+
+/** The fingerprint switch, with the one line that explains why it is or is not available. */
+@Composable
+fun FingerprintCard(
+    state: BiometricState,
+    vaultUnlocked: Boolean,
+    busy: String?,
+    onToggle: (Boolean) -> Unit,
+) {
+    val enabled = state == BiometricState.ON
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Filled.Fingerprint,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("گشودن با اثر انگشت", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.weight(1f))
+                Switch(
+                    checked = enabled,
+                    enabled = busy == null && state != BiometricState.UNAVAILABLE &&
+                        (vaultUnlocked || enabled),
+                    onCheckedChange = onToggle,
+                )
+            }
+            Text(
+                when {
+                    state == BiometricState.UNAVAILABLE ->
+                        "این گوشی حسگر اثر انگشت فعال ندارد یا در تنظیمات سیستم اثری ثبت نشده است."
+
+                    state == BiometricState.STALE ->
+                        "کلید اثر انگشت باطل شده است؛ با گذرواژه باز کن و دوباره فعال کن."
+
+                    enabled ->
+                        "فعال است: کلید گنجینه با کلید سخت‌افزاری همین گوشی و پشت تأیید اثر انگشت " +
+                            "نگه داشته می‌شود. گذرواژه سر جایش می‌ماند."
+
+                    !vaultUnlocked ->
+                        "برای فعال‌کردن، اول گنجینه را با گذرواژه باز کن."
+
+                    else ->
+                        "با روشن‌کردن این گزینه کلید گنجینه پشت اثر انگشت همین گوشی مهر می‌شود و " +
+                            "دیگر هر بار گذرواژه لازم نیست."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
 
 /**
  * Settings live in the app, not in the vault: coordinates and the size policy are device-local,
@@ -51,8 +108,11 @@ fun SettingsSheet(
     info: VaultInfo?,
     autoLockMinutes: Int,
     busy: String?,
+    vaultUnlocked: Boolean,
+    biometricState: BiometricState,
     onDismiss: () -> Unit,
     onSave: (LocalSettings, String?, String?, Int) -> Unit,
+    onBiometricToggle: (Boolean) -> Unit,
     onSync: () -> Unit,
     onDownloadAll: () -> Unit,
     onLock: () -> Unit,
@@ -85,6 +145,13 @@ fun SettingsSheet(
             }
 
             info?.let { VaultInfoCard(it) }
+
+            FingerprintCard(
+                state = biometricState,
+                vaultUnlocked = vaultUnlocked,
+                busy = busy,
+                onToggle = onBiometricToggle,
+            )
 
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -129,7 +196,10 @@ fun SettingsSheet(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // The action area is a grid of equal halves, not one row of buttons that has to fit:
+            // three wide buttons in a single Row used to crush the last one («قفل») until Compose
+            // broke the word letter by letter — «ق ف ل» stacked on three lines.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     enabled = busy == null,
                     onClick = {
@@ -148,43 +218,67 @@ fun SettingsSheet(
                             autoLock.toIntOrNull() ?: 10,
                         )
                     },
+                    modifier = Modifier.weight(1f),
                 ) { Text("ذخیره") }
-                OutlinedButton(onClick = onDismiss) { Text("بستن") }
+                OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("بستن") }
             }
 
             HorizontalDivider()
 
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = onSync, enabled = busy == null) {
-                    Icon(Icons.Filled.CloudSync, contentDescription = null, modifier = Modifier.height(16.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = onSync,
+                    enabled = busy == null,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(
+                        Icons.Filled.CloudSync,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
                     Spacer(Modifier.width(6.dp))
                     Text("همگام‌سازی")
                 }
-                OutlinedButton(onClick = onDownloadAll, enabled = busy == null) {
-                    Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = onDownloadAll,
+                    enabled = busy == null,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(
+                        Icons.Filled.CloudDownload,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
                     Spacer(Modifier.width(6.dp))
                     Text("دریافت همه")
                 }
-                OutlinedButton(onClick = onLock) {
-                    Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.height(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("قفل")
-                }
+            }
+
+            OutlinedButton(onClick = onLock, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("قفل گنجینه")
             }
 
             if (confirmWipe) {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("نسخهٔ محلی و کلیدها پاک شوند؟ باکت دست‌نخورده می‌ماند.")
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(onClick = onWipe) { Text("پاک کن") }
-                            TextButton(onClick = { confirmWipe = false }) { Text("بی‌خیال") }
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Button(onClick = onWipe, modifier = Modifier.weight(1f)) { Text("پاک کن") }
+                            TextButton(
+                                onClick = { confirmWipe = false },
+                                modifier = Modifier.weight(1f),
+                            ) { Text("بی‌خیال") }
                         }
                     }
                 }
             } else {
-                TextButton(onClick = { confirmWipe = true }) {
-                    Icon(Icons.Filled.DeleteForever, contentDescription = null, modifier = Modifier.height(16.dp))
+                TextButton(onClick = { confirmWipe = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.DeleteForever, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("پاک‌کردن نسخهٔ محلی", color = MaterialTheme.colorScheme.error)
                 }

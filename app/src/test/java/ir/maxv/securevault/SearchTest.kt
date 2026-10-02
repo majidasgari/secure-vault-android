@@ -2,6 +2,7 @@ package ir.maxv.securevault
 
 import ir.maxv.securevault.core.LiteralSearch
 import ir.maxv.securevault.core.PersianText
+import ir.maxv.securevault.core.SearchScope
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -107,5 +108,63 @@ class SearchTest {
         val hits = LiteralSearch.findAll(text, "چادر")
         assertEquals(1, hits.size)
         assertEquals(7, hits.first().line)
+    }
+
+    @Test
+    fun `a hit on a giant single line keeps a window instead of the whole line`() {
+        // a 2M-char line: slicing it whole is what blew the heap on the device
+        val line = "مقدمه ".repeat(300_000) + "یخساز" + " دنباله".repeat(300_000)
+        assertEquals("the fixture is one single line", 0, line.count { it == '\n' })
+        val hit = LiteralSearch.findAll(line, "یخساز").first()
+        assertTrue("line number must be 1", hit.line == 1)
+        assertTrue("window must stay small, was ${hit.lineText.length}", hit.lineText.length < 500)
+        assertTrue(hit.lineText.contains("یخساز"))
+        assertTrue(hit.lineText.startsWith("…"))
+        assertTrue(hit.lineText.endsWith("…"))
+        // the offset still points into the original text
+        assertEquals(line.substring(hit.offset, hit.offset + hit.length), "یخساز")
+    }
+
+    @Test
+    fun `line numbers stay right across many hits in one pass`() {
+        val text = (1..40).joinToString("\n") { "خط $it دارد نشانه" }
+        val hits = LiteralSearch.findAll(text, "نشانه")
+        assertEquals(40, hits.size)
+        assertEquals((1..40).toList(), hits.map { it.line })
+        assertEquals("خط 7 دارد نشانه", hits[6].lineText)
+    }
+
+    @Test
+    fun `every title is searchable while only normal text bodies are decrypted`() {
+        // normal + text-like: title and body
+        assertEquals(SearchScope.TITLES or SearchScope.BODY, SearchScope.of("normal", isTextLike = true))
+        assertFalse(SearchScope.titlesOnly(SearchScope.of("normal", isTextLike = true)))
+
+        // a normal image is found by name only
+        assertEquals(SearchScope.TITLES, SearchScope.of("normal", isTextLike = false))
+
+        // secret and secretfile: title only, never the body
+        assertEquals(SearchScope.TITLES, SearchScope.of("secret", isTextLike = true))
+        assertEquals(SearchScope.TITLES, SearchScope.of("secretfile", isTextLike = true))
+        assertTrue(SearchScope.titlesOnly(SearchScope.of("secret", isTextLike = true)))
+    }
+
+    @Test
+    fun `a body is only scanned when it is normal, text-like and not absurdly big`() {
+        assertTrue(SearchScope.scansBody("normal", isTextLike = true, size = 1024))
+        assertFalse(SearchScope.scansBody("normal", isTextLike = true, size = SearchScope.MAX_BODY_BYTES + 1))
+        assertTrue(SearchScope.scansBody("normal", isTextLike = true, size = SearchScope.MAX_BODY_BYTES))
+        assertFalse(SearchScope.scansBody("normal", isTextLike = false, size = 1024))
+        assertFalse(SearchScope.scansBody("secret", isTextLike = true, size = 1024))
+        assertFalse("an unknown size must not be trusted", SearchScope.scansBody("normal", isTextLike = true, size = -1))
+    }
+
+    @Test
+    fun `a secret file's title matches the way any other title does`() {
+        val title = "کارت بانکی — رمزها"
+        assertTrue(LiteralSearch.contains(title, "کارت"))
+        assertTrue(LiteralSearch.contains(title, "بانکی — رم"))
+        val hit = LiteralSearch.firstHit(title, "رمزها")
+        assertEquals(title.indexOf("رمزها"), hit!!.offset)
     }
 }

@@ -22,8 +22,8 @@ android {
         applicationId = "ir.maxv.securevault"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 7
+        versionName = "1.2.2"
         resourceConfigurations += listOf("fa", "en")
     }
 
@@ -90,6 +90,9 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.argon2kt)
+    // fingerprint unlock: BiometricPrompt (needs a FragmentActivity host)
+    implementation(libs.androidx.biometric)
+    implementation(libs.androidx.fragment)
 
     testImplementation(libs.junit)
     testImplementation(libs.org.json)

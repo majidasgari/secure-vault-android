@@ -1,7 +1,6 @@
 package ir.maxv.securevault.ui
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -11,8 +10,14 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.fragment.app.FragmentActivity
 
-class MainActivity : ComponentActivity() {
+/**
+ * The single activity. A `FragmentActivity` (not a bare `ComponentActivity`) because the fingerprint
+ * prompt is `BiometricPrompt`, which needs a `FragmentActivity` host — Compose is unaffected, since
+ * `FragmentActivity` is itself a `ComponentActivity`.
+ */
+class MainActivity : FragmentActivity() {
 
     private val viewModel: VaultViewModel by viewModels()
 

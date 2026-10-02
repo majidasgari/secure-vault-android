@@ -6,8 +6,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -17,6 +19,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -29,11 +32,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
 import ir.maxv.securevault.core.VaultPaths
 import ir.maxv.securevault.core.AppStage
+import ir.maxv.securevault.data.BiometricState
 
 /** The whole app shell: which screen, the top bar, the snackbar and the breadcrumb of routes. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,9 +51,29 @@ fun AppRoot(viewModel: VaultViewModel) {
     val search by viewModel.search.collectAsState()
     val searching by viewModel.searching.collectAsState()
     val message by viewModel.message.collectAsState()
+    val recents by viewModel.recents.collectAsState()
 
     var showSettings by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
+
+    val biometricRequest by viewModel.biometricRequest.collectAsState()
+    val activity = LocalContext.current as? FragmentActivity
+
+    // The prompt needs an Activity, so the ViewModel hands the cipher here and the UI runs it.
+    LaunchedEffect(biometricRequest) {
+        val request = biometricRequest ?: return@LaunchedEffect
+        if (activity == null) {
+            viewModel.consumeBiometricRequest()
+            return@LaunchedEffect
+        }
+        promptForBiometric(
+            activity = activity,
+            cipher = request.cipher,
+            title = request.title,
+            subtitle = request.subtitle,
+            negative = request.negative,
+        ) { outcome -> viewModel.onBiometricResult(outcome, request) }
+    }
 
     LaunchedEffect(message) {
         message?.let {
@@ -125,7 +151,9 @@ fun AppRoot(viewModel: VaultViewModel) {
                             busy = state.busy,
                             progress = state.progress,
                             error = state.error,
+                            biometricEnabled = state.biometric == BiometricState.ON,
                             onUnlock = viewModel::unlock,
+                            onBiometricUnlock = viewModel::requestBiometricUnlock,
                             onSync = viewModel::sync,
                             onSettings = { showSettings = true },
                             onDismissError = viewModel::consumeMessage,
@@ -150,7 +178,16 @@ fun AppRoot(viewModel: VaultViewModel) {
                                         onOpenFolder = viewModel::openFolder,
                                         onOpenNote = { row -> viewModel.openNote(row.path) },
                                         onCrumb = viewModel::openFolder,
-                                        header = {},
+                                        header = {
+                                            // the shortcut belongs on the vault's front page only
+                                            if (current.path.isEmpty()) {
+                                                RecentFilesCard(
+                                                    items = recents,
+                                                    onOpen = { path -> viewModel.openNote(path) },
+                                                    onClear = { viewModel.clearRecents() },
+                                                )
+                                            }
+                                        },
                                         busy = state.busy,
                                     )
                                 }
@@ -193,17 +230,42 @@ fun AppRoot(viewModel: VaultViewModel) {
                 }
             }
 
+            if (state.stage == AppStage.UNLOCKED && state.offerBiometric && state.biometric == BiometricState.OFF) {
+                AlertDialog(
+                    onDismissRequest = viewModel::dismissBiometricOffer,
+                    icon = { Icon(Icons.Filled.Fingerprint, contentDescription = null) },
+                    title = { Text("گشودن با اثر انگشت") },
+                    text = {
+                        Text(
+                            "از این پس می‌توانی گنجینه را به‌جای گذرواژه با اثر انگشت باز کنی.\n\n" +
+                                "کلید گنجینه با کلید سخت‌افزاری همین گوشی مهر می‌شود و فقط پس از تأیید " +
+                                "اثر انگشت باز می‌شود؛ گذرواژه سر جایش می‌ماند و اگر اثر انگشت‌های " +
+                                "دستگاه عوض شوند، همان گذرواژه دوباره کار می‌کند."
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = viewModel::requestBiometricEnable) { Text("فعال کن") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = viewModel::dismissBiometricOffer) { Text("بعداً") }
+                    },
+                )
+            }
+
             if (showSettings) {
                 SettingsSheet(
                     settings = state.settings,
                     info = state.info,
                     autoLockMinutes = viewModel.repository.autoLockMinutes,
                     busy = state.busy,
+                    vaultUnlocked = state.stage == AppStage.UNLOCKED,
+                    biometricState = state.biometric,
                     onDismiss = { showSettings = false },
                     onSave = { settings, access, secret, autoLock ->
                         viewModel.saveSetup(settings, access, secret)
                         viewModel.repository.autoLockMinutes = autoLock
                     },
+                    onBiometricToggle = viewModel::setBiometricEnabled,
                     onSync = viewModel::sync,
                     onDownloadAll = viewModel::downloadEverything,
                     onLock = {

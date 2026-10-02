@@ -4,13 +4,17 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import ir.maxv.securevault.data.LocalSettings
+import ir.maxv.securevault.data.RecentItem
 import ir.maxv.securevault.data.SearchOutcome
 import ir.maxv.securevault.data.VaultRepository
 import ir.maxv.securevault.data.VaultRow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import javax.crypto.Cipher
 
 /** Where the unlocked app currently is. */
 sealed class Route {
@@ -43,6 +47,28 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     /** Set when the user taps an image whose blob is not on the device yet. */
     private val _pendingImage = MutableStateFlow<String?>(null)
     val pendingImage: StateFlow<String?> = _pendingImage.asStateFlow()
+
+    /** A pending fingerprint prompt the UI must run (the prompt needs an Activity). */
+    private val _biometricRequest = MutableStateFlow<BiometricRequest?>(null)
+    val biometricRequest: StateFlow<BiometricRequest?> = _biometricRequest.asStateFlow()
+
+    /** Files opened on this device, newest first — the shortcut back to what he actually uses. */
+    private val _recents = MutableStateFlow<List<RecentItem>>(emptyList())
+    val recents: StateFlow<List<RecentItem>> = _recents.asStateFlow()
+
+    private var lastOpenedPath: String? = null
+    private var lastOpenedAt: Long = 0L
+
+    /** What the prompt is for. */
+    enum class BiometricMode { UNLOCK, ENABLE }
+
+    data class BiometricRequest(
+        val cipher: Cipher,
+        val mode: BiometricMode,
+        val title: String,
+        val subtitle: String,
+        val negative: String,
+    )
 
     data class NoteView(
         val row: VaultRow,
@@ -79,11 +105,13 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         val result = repository.sync()
         _message.value = result
         refreshOpenNote()
+        refreshRecents()
     }
 
     fun downloadEverything() = viewModelScope.launch {
         _message.value = repository.downloadEverything()
         refreshOpenNote()
+        refreshRecents()
     }
 
     fun unlock(password: String) = viewModelScope.launch {
@@ -91,6 +119,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         if (ok) {
             _routes.value = Route.Folder("")
             _search.value = null
+            refreshRecents()
         }
     }
 
@@ -98,6 +127,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         repository.lock()
         _note.value = null
         _search.value = null
+        _recents.value = emptyList()
     }
 
     fun wipe() {
@@ -105,9 +135,83 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         _note.value = null
         _search.value = null
         _routes.value = Route.Folder("")
+        _recents.value = emptyList()
     }
 
     fun updateSettings(settings: LocalSettings) = repository.updateSettings(settings)
+
+    // ── fingerprint ───────────────────────────────────────────────────────────────
+    /** Ask for the sensor, then open the vault from the sealed record. */
+    fun requestBiometricUnlock() = viewModelScope.launch {
+        val cipher = withContext(Dispatchers.IO) { repository.biometricDecryptCipher() }
+        if (cipher == null) {
+            _message.value = "کلید اثر انگشت روی این دستگاه در دسترس نیست؛ با گذرواژه باز کن."
+            repository.refreshBiometric()
+            return@launch
+        }
+        _biometricRequest.value = BiometricRequest(
+            cipher = cipher,
+            mode = BiometricMode.UNLOCK,
+            title = "گشودن گنجینه",
+            subtitle = "اثر انگشتت را روی حسگر بگذار",
+            negative = "گذرواژه",
+        )
+    }
+
+    /** Ask for the sensor to seal the running key, so later unlocks need no password. */
+    fun requestBiometricEnable() = viewModelScope.launch {
+        repository.dismissBiometricOffer()
+        val cipher = withContext(Dispatchers.IO) { repository.biometricEncryptCipher() }
+        if (cipher == null) {
+            _message.value = "حسگر اثر انگشت در دسترس نیست یا اثری ثبت نشده است."
+            repository.refreshBiometric()
+            return@launch
+        }
+        _biometricRequest.value = BiometricRequest(
+            cipher = cipher,
+            mode = BiometricMode.ENABLE,
+            title = "گشودن با اثر انگشت",
+            subtitle = "برای مهر کردن کلید گنجینه، اثر انگشتت را بگذار",
+            negative = "بی‌خیال",
+        )
+    }
+
+    /** The UI swallowed the request (e.g. no Activity); drop it. */
+    fun consumeBiometricRequest() {
+        _biometricRequest.value = null
+    }
+
+    fun onBiometricResult(outcome: BiometricOutcome, request: BiometricRequest) = viewModelScope.launch {
+        _biometricRequest.value = null
+        when (outcome) {
+            is BiometricOutcome.Cancelled -> Unit
+
+            is BiometricOutcome.Failed -> _message.value = outcome.message
+
+            is BiometricOutcome.Unlocked -> when (request.mode) {
+                BiometricMode.UNLOCK -> {
+                    val ok = repository.unlockWithBiometric(outcome.cipher)
+                    if (ok) {
+                        _routes.value = Route.Folder("")
+                        _search.value = null
+                        refreshRecents()
+                    }
+                }
+
+                BiometricMode.ENABLE -> {
+                    val ok = repository.enableBiometric(outcome.cipher)
+                    _message.value = if (ok) "از این پس می‌توانی گنجینه را با اثر انگشت باز کنی." else null
+                }
+            }
+        }
+    }
+
+    fun dismissBiometricOffer() = repository.dismissBiometricOffer()
+
+    /** Settings switch: on asks the sensor first, off drops the sealed record immediately. */
+    fun setBiometricEnabled(enabled: Boolean) {
+        if (enabled) requestBiometricEnable() else repository.disableBiometric()
+    }
 
     // ── navigation ────────────────────────────────────────────────────────────────
     fun openFolder(path: String) {
@@ -124,8 +228,40 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             _message.value = "یادداشت پیدا نشد: $path"
             return
         }
+        rememberOpened(row.path)
         _routes.value = Route.Note(path, highlight)
         loadNote(row, reveal = !row.isSecret)
+    }
+
+    // ── recently opened ───────────────────────────────────────────────────────────
+    /**
+     * Count one open.
+     *
+     * The same note gets opened twice in a row by the UI (the tap, then the screen's own load
+     * effect), so repeats inside a few seconds do not bump the counter again — otherwise "۹ بار"
+     * would just mean "he scrolled past it".
+     */
+    private fun rememberOpened(path: String) {
+        val now = System.currentTimeMillis()
+        if (path == lastOpenedPath && now - lastOpenedAt < OPEN_DEDUPE_MS) return
+        lastOpenedPath = path
+        lastOpenedAt = now
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { repository.recordOpened(path) }
+            refreshRecents()
+        }
+    }
+
+    /** Re-read the list (a disk read, so never on the main thread). */
+    fun refreshRecents() = viewModelScope.launch {
+        _recents.value = withContext(Dispatchers.IO) { repository.recentItems() }
+    }
+
+    fun clearRecents() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { repository.clearRecent() }
+            _recents.value = emptyList()
+        }
     }
 
     fun back() {
@@ -209,5 +345,10 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         val ok = repository.downloadRow(row)
         _message.value = if (ok) "تصویر دریافت شد." else "دریافت تصویر ناموفق بود."
         refreshOpenNote()
+    }
+
+    companion object {
+        /** Two opens of the same note inside this window count as one (the UI loads a note twice). */
+        private const val OPEN_DEDUPE_MS = 5_000L
     }
 }

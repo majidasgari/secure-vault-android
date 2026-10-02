@@ -107,6 +107,17 @@ data class LiteralHit(
 object LiteralSearch {
 
     /**
+     * How much of a line a hit keeps for display.
+     *
+     * A note can legitimately be one multi-megabyte line (exports, base64, one long paragraph).
+     * Slicing that whole line per hit is what made content search die with an OutOfMemoryError on
+     * the device, so a hit carries a window around itself — which is all the UI ever showed anyway
+     * (`take(160)`).
+     */
+    private const val LINE_BEFORE = 120
+    private const val LINE_AFTER = 280
+
+    /**
      * Find every literal occurrence of [query] in [text].
      *
      * Matching happens on the normalised form (see [PersianText.normalize]); the offsets in the
@@ -120,18 +131,31 @@ object LiteralSearch {
         if (needle.isEmpty()) return emptyList()
         val hits = ArrayList<LiteralHit>()
         var from = 0
+        // Hits come out in increasing offset order, so line number and line bounds are tracked in a
+        // single forward pass; walking backwards from every hit is O(n) *per hit* on a huge line.
+        var lineNo = 1
+        var lineStart = 0
+        var cursor = 0
         while (hits.size < maxHits) {
             val idx = hay.text.indexOf(needle, from)
             if (idx < 0) break
             val lastIndex = idx + needle.length - 1
             val start = hay.map[idx]
             val end = hay.map[lastIndex] + 1
+            while (cursor < start) {
+                if (text[cursor] == '\n') {
+                    lineNo++
+                    lineStart = cursor + 1
+                }
+                cursor++
+            }
+            val lineEnd = text.indexOf('\n', start).let { if (it < 0) text.length else it }
             hits.add(
                 LiteralHit(
                     offset = start,
                     length = end - start,
-                    line = lineOf(text, start),
-                    lineText = lineText(text, start),
+                    line = lineNo,
+                    lineText = lineWindow(text, lineStart, lineEnd, start),
                     contextStart = maxOf(0, start - contextChars),
                     contextEnd = minOf(text.length, end + contextChars),
                 )
@@ -161,12 +185,25 @@ object LiteralSearch {
         return line
     }
 
-    /** The full text of the line that contains [offset]. */
+    /**
+     * The line that contains [offset], **clipped to a window** around it: a short line comes back
+     * whole, a megabyte-long one comes back as `…` + the part worth reading + `…`.
+     */
     fun lineText(text: String, offset: Int): String {
-        val start = text.lastIndexOf('\n', minOf(offset, maxOf(0, text.length - 1)).coerceAtLeast(0))
-            .let { if (it < 0) 0 else it + 1 }
-        val end = text.indexOf('\n', offset).let { if (it < 0) text.length else it }
-        return text.substring(start, end)
+        val safe = minOf(offset, maxOf(0, text.length - 1)).coerceAtLeast(0)
+        val start = text.lastIndexOf('\n', safe).let { if (it < 0) 0 else it + 1 }
+        val end = text.indexOf('\n', safe).let { if (it < 0) text.length else it }
+        return lineWindow(text, start, end, offset)
+    }
+
+    private fun lineWindow(text: String, lineStart: Int, lineEnd: Int, offset: Int): String {
+        if (lineStart >= lineEnd) return ""
+        val from = maxOf(lineStart, offset - LINE_BEFORE)
+        val to = minOf(lineEnd, offset + LINE_AFTER)
+        if (from == lineStart && to == lineEnd) return text.substring(lineStart, lineEnd)
+        val head = if (from > lineStart) "…" else ""
+        val tail = if (to < lineEnd) "…" else ""
+        return head + text.substring(from, to) + tail
     }
 
     /** Build a snippet around a hit, with `…` markers instead of raw slicing. */
