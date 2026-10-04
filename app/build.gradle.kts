@@ -22,8 +22,8 @@ android {
         applicationId = "ir.maxv.securevault"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.2.2"
+        versionCode = 9
+        versionName = "1.3.1"
         resourceConfigurations += listOf("fa", "en")
     }
 

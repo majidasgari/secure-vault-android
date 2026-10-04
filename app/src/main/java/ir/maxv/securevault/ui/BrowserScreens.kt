@@ -50,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import ir.maxv.securevault.core.Credentials
 import ir.maxv.securevault.core.PersianText
 import ir.maxv.securevault.core.VaultPaths
 import ir.maxv.securevault.data.VaultRow
@@ -277,6 +278,17 @@ fun NoteScreen(
                         }
                     }
                 }
+            }
+        }
+
+        // A credential entry's live fields — the rotating code, and the values worth copying — are
+        // read from the note body that is already decrypted here. Nothing extra is fetched, and the
+        // card appears for a secret entry exactly like the desktop viewer's, not for prose notes.
+        val body = view.text
+        if (view.row.isSecret && body != null && body.isNotBlank()) {
+            val fields = Credentials.parse(body)
+            if (fields.hasOtp || fields.hasPassword || fields.hasUsername) {
+                item { CredentialCard(fields) }
             }
         }
 
