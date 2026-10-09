@@ -1,7 +1,25 @@
 # گنجینه — Secure Vault برای اندروید (فقط خواندن)
 
-کلاینت اندروید والت رمزشدهٔ [Secure Vault]: یادداشت‌های والت را از یک باکت سازگار با S3 می‌گیرد،
+کلاینت اندروید والت رمزشدهٔ [Secure Vault](https://github.com/majidasgari/secure-vault): یادداشت‌های والت را از یک باکت سازگار با S3 می‌گیرد،
 روی دستگاه رمزگشایی می‌کند، و اجازهٔ **پیمایش، خواندن و جست‌وجوی لفظی** می‌دهد. هیچ چیز نمی‌نویسد.
+
+> **Read-only Android client for [Secure Vault](https://github.com/majidasgari/secure-vault)** — it pulls the encrypted vault from
+> any S3-compatible bucket, unlocks it on the phone with the master password, and gives browsing,
+> literal search and one-time codes. It never writes: the desktop stays the single writer.
+
+## خانوادهٔ گاوصندوق — سه مخزن
+
+این برنامه یکی از سه کلاینتی است که روی **یک** والت کار می‌کنند:
+
+| مخزن | چه چیزی است |
+| --- | --- |
+| [secure-vault](https://github.com/majidasgari/secure-vault) | خودِ گاوصندوق: قالب ذخیره‌سازی و رمزنگاری، اپ دسکتاپ Qt، رابط وب، پل MCP، سینک دوطرفهٔ S3 و ایمپورت‌کننده‌ها. تنها نویسندهٔ والت همین کلاینت است. |
+| **[secure-vault-android](https://github.com/majidasgari/secure-vault-android)** — همین مخزن | **گنجینه**: والت را از باکت S3 می‌گیرد، روی گوشی باز می‌کند و پیمایش، جست‌وجوی لفظی، کد یکبارمصرف و رونوشت فیلدها را می‌دهد. هیچ چیز نمی‌نویسد. |
+| [secure-vault-firefox](https://github.com/majidasgari/secure-vault-firefox) | افزونهٔ فایرفاکس: فقط با کلیک، نام کاربری/گذرواژه/کد یکبارمصرف را از پوشهٔ رمزهای گاوصندوق داخل فرم ورود سایت‌ها می‌گذارد. هیچ چیز خودکار پر نمی‌شود. |
+
+قالب روی دیسک در هر سه یکی است، پس این برنامه «نسخهٔ دوم» والت نیست؛ کلاینت همان والت است —
+و fixtureهای تستش با خودِ پیاده‌سازی دسکتاپ ساخته می‌شوند (`tools/make_test_fixture.py`،
+`tools/make_totp_fixture.py`).
 
 ## چه می‌کند
 
